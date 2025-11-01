@@ -628,3 +628,113 @@ if __name__ == "__main__":
             print("Linux/Mac cron:")
             print(f"  0 23 * * * cd {os.path.dirname(os.path.abspath(__file__))} && python {os.path.basename(__file__)}")
             print("="*50)
+
+def check_and_send_missing_reports(self, max_days_back=7):
+    """
+    過去N日分のレポートをチェックし、未送信があれば送信
+    
+    Args:
+        max_days_back: 何日前まで遡ってチェックするか
+    """
+    print("🔍 Checking for missing reports...")
+    
+    reports_sent = []
+    today = datetime.now()
+    
+    for days_ago in range(1, max_days_back + 1):
+        target_date = today - timedelta(days=days_ago)
+        date_str = target_date.strftime('%Y-%m-%d')
+        
+        # そのレポートが送信済みかチェック
+        report_file = f"last_report_{date_str}.txt"
+        
+        if os.path.exists(report_file):
+            print(f"  ✅ {date_str}: Already sent")
+            continue
+        
+        # 未送信の場合、そのデータがあるかチェック
+        stats = self.get_today_stats(days_ago=days_ago)
+        
+        if stats['total_chars'] == 0 and stats['lines_mined'] == 0:
+            print(f"  ⚪ {date_str}: No data (skipped)")
+            continue
+        
+        # データがあるのに未送信 → 送信
+        print(f"  📤 {date_str}: Sending missing report...")
+        
+        try:
+            streak = self.get_activity_streak()
+            heatmap_image = self.create_activity_heatmap_image()
+            embed = self.format_report(stats, streak, days_ago=days_ago)
+            
+            if self.send_to_discord(embed, heatmap_image):
+                # 送信記録を保存
+                with open(report_file, 'w') as f:
+                    f.write(datetime.now().isoformat())
+                reports_sent.append(date_str)
+                print(f"  ✅ {date_str}: Sent successfully!")
+            else:
+                print(f"  ❌ {date_str}: Failed to send")
+                
+        except Exception as e:
+            print(f"  ❌ {date_str}: Error - {e}")
+    
+    if reports_sent:
+        print(f"\n✨ Sent {len(reports_sent)} missing report(s): {', '.join(reports_sent)}")
+    else:
+        print("\n✅ All reports are up to date!")
+    
+    return len(reports_sent)
+
+
+def save_report_date_with_date(self, date_str):
+    """特定の日付のレポート送信を記録"""
+    report_file = f"last_report_{date_str}.txt"
+    with open(report_file, 'w') as f:
+        f.write(datetime.now().isoformat())
+
+
+def generate_and_send_report(self, force=False, days_ago=0, check_missing=False):
+    """レポートを生成して送信
+    
+    Args:
+        force: 強制実行
+        days_ago: 何日前のデータか（0=今日、1=昨日）
+        check_missing: 過去の未送信レポートもチェックするか
+    """
+    # 過去の未送信レポートをチェック
+    if check_missing:
+        self.check_and_send_missing_reports(max_days_back=7)
+        return
+    
+    target_date = datetime.now() - timedelta(days=days_ago)
+    date_str = target_date.strftime('%Y-%m-%d')
+    report_file = f"last_report_{date_str}.txt"
+    
+    # その日のレポートが送信済みかチェック
+    if not force and os.path.exists(report_file):
+        print(f"ℹ️  Report for {date_str} already sent")
+        return
+    
+    print(f"📊 Generating report for {date_str}...")
+    stats = self.get_today_stats(days_ago=days_ago)
+    
+    # データがない場合はスキップ
+    if stats['total_chars'] == 0 and stats['lines_mined'] == 0:
+        print(f"ℹ️  No data for {date_str}, skipping...")
+        return
+    
+    streak = self.get_activity_streak()
+    
+    print("📈 Creating heatmap image...")
+    heatmap_image = self.create_activity_heatmap_image()
+    
+    embed = self.format_report(stats, streak, days_ago=days_ago)
+    
+    if self.send_to_discord(embed, heatmap_image):
+        self.save_report_date_with_date(date_str)
+        print("✅ Report sent successfully!")
+        print(f"   - Date: {date_str}")
+        print(f"   - Play time: {stats['play_time_hours']:.1f} hours")
+        print(f"   - Characters: {stats['total_chars']:,}")
+        print(f"   - Streak: {streak} days")
