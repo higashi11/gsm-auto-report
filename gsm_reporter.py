@@ -568,37 +568,63 @@ if __name__ == "__main__":
     debug = "--debug" in sys.argv
     setup = "--setup" in sys.argv
     
-    # 設定ファイルの読み込みまたは作成
-    if setup or not os.path.exists("gsm_config.json"):
-        config = create_config_file()
+    # GitHub Actions環境の検出
+    is_github_actions = os.getenv('GITHUB_ACTIONS') == 'true'
+    
+    if is_github_actions:
+        # GitHub Actions環境での実行
+        print("🔧 Running in GitHub Actions mode")
+        
+        db_path = os.path.join(os.getcwd(), 'gsm.db')
+        webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+        
+        if not os.path.exists(db_path):
+            print(f"❌ Database file not found: {db_path}")
+            sys.exit(1)
+        
+        if not webhook_url:
+            print("❌ DISCORD_WEBHOOK_URL environment variable not set")
+            sys.exit(1)
+        
+        print(f"📁 Database: {db_path}")
+        print(f"🔗 Webhook: {webhook_url[:50]}...")
+        
+        reporter = GSMReporter(db_path, webhook_url)
+        
+        if debug:
+            reporter.list_tables()
+            reporter.show_sample_data()
+        
+        reporter.generate_and_send_report(force=True)
+        
     else:
-        config = load_config()
-    
-    if not config or not config.get("db_path") or not config.get("webhook_url"):
-        print("❌ 設定が不完全です。--setup で再設定してください。")
-        sys.exit(1)
-    
-    # レポーター初期化
-    reporter = GSMReporter(config["db_path"], config["webhook_url"])
-    
-    # デバッグモード
-    if debug:
-        reporter.list_tables()
-        reporter.show_sample_data()
-        print("\n" + "="*50)
-    
-    # レポート送信
-    reporter.generate_and_send_report(force=force)
-    
-    # スケジューラ設定のヘルプ
-    if setup:
-        print("\n" + "="*50)
-        print("📅 自動実行の設定方法\n")
-        print("Windowsタスクスケジューラ:")
-        print("  毎日 23:00 に実行")
-        print(f"  プログラム: python")
-        print(f"  引数: {os.path.abspath(__file__)}")
-        print(f"  開始: {os.path.dirname(os.path.abspath(__file__))}\n")
-        print("Linux/Mac cron:")
-        print(f"  0 23 * * * cd {os.path.dirname(os.path.abspath(__file__))} && python {os.path.basename(__file__)}")
-        print("="*50)
+        # ローカル環境での実行
+        if setup or not os.path.exists("gsm_config.json"):
+            config = create_config_file()
+        else:
+            config = load_config()
+        
+        if not config or not config.get("db_path") or not config.get("webhook_url"):
+            print("❌ Configuration incomplete. Run with --setup to reconfigure.")
+            sys.exit(1)
+        
+        reporter = GSMReporter(config["db_path"], config["webhook_url"])
+        
+        if debug:
+            reporter.list_tables()
+            reporter.show_sample_data()
+            print("\n" + "="*50)
+        
+        reporter.generate_and_send_report(force=force)
+        
+        if setup:
+            print("\n" + "="*50)
+            print("📅 Auto-execution Setup\n")
+            print("Windows Task Scheduler:")
+            print("  Run daily at 11:00 PM")
+            print(f"  Program: python")
+            print(f"  Arguments: {os.path.abspath(__file__)}")
+            print(f"  Start in: {os.path.dirname(os.path.abspath(__file__))}\n")
+            print("Linux/Mac cron:")
+            print(f"  0 23 * * * cd {os.path.dirname(os.path.abspath(__file__))} && python {os.path.basename(__file__)}")
+            print("="*50)
