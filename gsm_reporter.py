@@ -567,6 +567,8 @@ if __name__ == "__main__":
     force = "--force" in sys.argv
     debug = "--debug" in sys.argv
     setup = "--setup" in sys.argv
+    yesterday = "--yesterday" in sys.argv
+    check_missing = "--check-missing" in sys.argv
     
     # GitHub Actions環境の検出
     is_github_actions = os.getenv('GITHUB_ACTIONS') == 'true'
@@ -586,16 +588,10 @@ if __name__ == "__main__":
             print("❌ DISCORD_WEBHOOK_URL environment variable not set")
             sys.exit(1)
         
-        print(f"📁 Database: {db_path}")
-        print(f"🔗 Webhook: {webhook_url[:50]}...")
-        
         reporter = GSMReporter(db_path, webhook_url)
         
-        if debug:
-            reporter.list_tables()
-            reporter.show_sample_data()
-        
-        reporter.generate_and_send_report(force=True)
+        # 前日（1日前）のレポートを生成
+        reporter.generate_and_send_report(force=True, days_ago=1)
         
     else:
         # ローカル環境での実行
@@ -615,20 +611,44 @@ if __name__ == "__main__":
             reporter.show_sample_data()
             print("\n" + "="*50)
         
-        reporter.generate_and_send_report(force=force)
-        
-        if setup:
-            print("\n" + "="*50)
-            print("📅 Auto-execution Setup\n")
-            print("Windows Task Scheduler:")
-            print("  Run daily at 11:00 PM")
-            print(f"  Program: python")
-            print(f"  Arguments: {os.path.abspath(__file__)}")
-            print(f"  Start in: {os.path.dirname(os.path.abspath(__file__))}\n")
-            print("Linux/Mac cron:")
-            print(f"  0 23 * * * cd {os.path.dirname(os.path.abspath(__file__))} && python {os.path.basename(__file__)}")
-            print("="*50)
+        # 未送信レポートのチェック
+        if check_missing:
+            reporter.generate_and_send_report(check_missing=True)
+        # 昨日のレポート
+        elif yesterday:
+            reporter.generate_and_send_report(force=force, days_ago=1)
+        # 通常実行（今日のレポート）
+        else:
+            reporter.generate_and_send_report(force=force)
+```
 
+---
+
+## 🎯 完成後の動作
+
+### シナリオ1: PCが1amに起動している
+```
+1:00 AM → タスクスケジューラ実行
+         → 前日のレポート送信 ✅
+         → last_report_2024-01-15.txt 作成
+```
+
+### シナリオ2: PCが1amにオフ、朝10amに起動
+```
+10:00 AM → PC起動
+10:05 AM → スタートアップスクリプト実行
+         → 昨日(1/15)のレポート未送信を検出
+         → 前日のレポート送信 ✅
+         → last_report_2024-01-15.txt 作成
+```
+
+### シナリオ3: 3日間PCを起動していない
+```
+4日目に起動
+起動5分後 → スタートアップスクリプト実行
+          → 過去7日分をチェック
+          → 1/15, 1/16, 1/17 が未送信
+          → 3つのレポートを順次送信 ✅✅✅
 def check_and_send_missing_reports(self, max_days_back=7):
     """
     過去N日分のレポートをチェックし、未送信があれば送信
