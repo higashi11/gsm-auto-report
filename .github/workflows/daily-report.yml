@@ -1,0 +1,43 @@
+name: GSM Daily Report
+
+on:
+  schedule:
+    # UTC 14:00 = JST 23:00 (毎日23時に実行)
+    - cron: '0 14 * * *'
+  workflow_dispatch:  # 手動実行も可能
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # リポジトリをチェックアウト
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      # Pythonをセットアップ
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      # 依存パッケージをインストール
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      # データベースファイルをデコード
+      - name: Decode database file
+        env:
+          GSM_DB_BASE64: ${{ secrets.GSM_DB_BASE64 }}
+        run: |
+          echo "$GSM_DB_BASE64" | base64 -d > gsm.db
+          echo "Database file created: $(ls -lh gsm.db)"
+      
+      # レポートを生成＆送信
+      - name: Generate and send report
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python gsm_reporter.py --force
