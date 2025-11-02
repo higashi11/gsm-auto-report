@@ -542,7 +542,7 @@ if __name__ == "__main__":
             sys.exit(1)
         
         reporter = GSMReporter(db_path, webhook_url)
-        reporter.generate_and_send_report(force=True, days_ago=0)
+        reporter.generate_and_send_report(force=True, days_ago=1)
         
     else:
         if setup or not os.path.exists("gsm_config.json"):
