@@ -1,0 +1,144 @@
+name: GSM Daily Report (Debug)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests matplotlib
+      
+      - name: Decode database file
+        env:
+          GSM_DB_BASE64: ${{ secrets.GSM_DB_BASE64 }}
+        run: |
+          echo "Decoding database..."
+          echo "$GSM_DB_BASE64" | base64 -d > gsm.db
+          echo "Database file created:"
+          ls -lh gsm.db
+          file gsm.db
+      
+      - name: Check database content
+        run: |
+          echo "=== Database Information ==="
+          echo ""
+          echo "Tables in database:"
+          sqlite3 gsm.db "SELECT name FROM sqlite_master WHERE type='table'"
+          echo ""
+          echo "Total lines in database:"
+          sqlite3 gsm.db "SELECT COUNT(*) FROM game_lines"
+          echo ""
+          echo "Latest 5 entries:"
+          sqlite3 gsm.db "SELECT datetime(timestamp, 'unixepoch', 'localtime'), game_name, substr(line_text, 1, 30) FROM game_lines ORDER BY timestamp DESC LIMIT 5"
+          echo ""
+          echo "Lines from yesterday:"
+          sqlite3 gsm.db "SELECT COUNT(*) FROM game_lines WHERE date(timestamp, 'unixepoch', 'localtime') = date('now', '-1 day')"
+          echo ""
+          echo "Lines from today:"
+          sqlite3 gsm.db "SELECT COUNT(*) FROM game_lines WHERE date(timestamp, 'unixepoch', 'localtime') = date('now')"
+          echo ""
+          echo "Date range in database:"
+          sqlite3 gsm.db "SELECT date(MIN(timestamp), 'unixepoch', 'localtime') as first_date, date(MAX(timestamp), 'unixepoch', 'localtime') as last_date FROM game_lines"
+      
+      - name: Check webhook URL
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          echo "Webhook URL is set: ${DISCORD_WEBHOOK_URL:+YES}"
+          echo "Webhook URL length: ${#DISCORD_WEBHOOK_URL}"
+          echo "Webhook starts with: ${DISCORD_WEBHOOK_URL:0:35}..."
+      
+      - name: Test report generation
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          echo "=== Running Report Generator ==="
+          python gsm_reporter.py --force
+```
+
+5. **「Commit new file」をクリック**
+
+---
+
+## ▶️ デバッグWorkflowを実行
+
+1. **Actionsタブを開く**
+
+2. 左側のリストに **「GSM Daily Report (Debug)」** が表示されているのでクリック
+
+3. 右側の **「Run workflow」** ボタンをクリック
+
+4. もう一度 **「Run workflow」** をクリック（緑のボタン）
+
+5. **実行が始まります**（30秒〜1分ほど待つ）
+
+---
+
+## 📊 結果を確認
+
+1. **実行中のワークフローをクリック**
+
+2. **「report」ジョブをクリック**
+
+3. **各ステップを展開**して内容を確認：
+
+   特に以下のステップが重要：
+   - **「Check database content」** - データベースの中身
+   - **「Test report generation」** - レポート生成結果
+
+---
+
+## 🔍 何を確認するか
+
+### 正常な場合の出力例：
+```
+=== Database Information ===
+
+Tables in database:
+game_lines
+ai_models
+games
+
+Total lines in database:
+1543
+
+Latest 5 entries:
+2025-01-20 14:32:15|GameTitle|これは日本語のテキストです...
+2025-01-20 14:31:42|GameTitle|もっと文章が続きます...
+...
+
+Lines from yesterday:
+87
+
+Lines from today:
+12
+
+Date range in database:
+2024-12-15|2025-01-20
+```
+
+### 問題がある場合の出力例：
+```
+Total lines in database:
+0
+
+Lines from yesterday:
+0
+```
+
+または
+```
+Error: no such table: game_lines
