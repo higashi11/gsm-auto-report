@@ -40,103 +40,102 @@ class GSMReporter:
         """データベースに接続"""
         return sqlite3.connect(self.db_path)
     
-def get_today_stats(self, days_ago=0):
-    """指定日の統計を取得（days_ago=0なら今日、1なら昨日）"""
-    conn = self.connect_db()
-    cursor = conn.cursor()
-    
-    # 指定日の開始と終了のUNIXタイムスタンプを取得
-    now = datetime.now()
-    target_date = now - timedelta(days=days_ago)
-    day_start = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0)
-    day_end = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
-    
-    start_timestamp = day_start.timestamp()
-    end_timestamp = day_end.timestamp()
-    
-    stats = {}
-    
-    try:
-        # 本日追加された文章数を取得（timestamp列を使用）
-        cursor.execute("""
-            SELECT COUNT(*) FROM game_lines 
-            WHERE timestamp >= ? AND timestamp <= ?
-        """, (start_timestamp, end_timestamp))
-        stats['lines_mined'] = cursor.fetchone()[0]
+    def get_today_stats(self):
+        """本日の統計を取得（タイムスタンプから直接計算）"""
+        conn = self.connect_db()
+        cursor = conn.cursor()
         
-        # 本日Ankiカードに追加された文章数
-        cursor.execute("""
-            SELECT COUNT(*) FROM game_lines 
-            WHERE timestamp >= ? AND timestamp <= ?
-            AND (screenshot_in_anki != '' OR audio_in_anki != '')
-        """, (start_timestamp, end_timestamp))
-        stats['anki_cards_created'] = cursor.fetchone()[0]
+        # 今日の開始と終了のUNIXタイムスタンプを取得（JST基準）
+        now = datetime.now()
+        today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
+        today_end = datetime(now.year, now.month, now.day, 23, 59, 59)
         
-        # 本日プレイしたゲーム数（ユニークなgame_name）
-        cursor.execute("""
-            SELECT COUNT(DISTINCT game_name) FROM game_lines 
-            WHERE timestamp >= ? AND timestamp <= ?
-        """, (start_timestamp, end_timestamp))
-        stats['games_played'] = cursor.fetchone()[0]
+        start_timestamp = today_start.timestamp()
+        end_timestamp = today_end.timestamp()
         
-        # 累計文章数
-        cursor.execute("SELECT COUNT(*) FROM game_lines")
-        stats['total_lines'] = cursor.fetchone()[0]
+        stats = {}
         
-        # 本日プレイしたゲームのリストと文字数
-        cursor.execute("""
-            SELECT game_name, 
-                   SUM(LENGTH(line_text)) as total_chars,
-                   COUNT(*) as line_count
-            FROM game_lines 
-            WHERE timestamp >= ? AND timestamp <= ?
-            AND game_name IS NOT NULL AND game_name != ''
-            GROUP BY game_name
-            ORDER BY total_chars DESC
-        """, (start_timestamp, end_timestamp))
+        try:
+            # 本日追加された文章数を取得（timestamp列を使用）
+            cursor.execute("""
+                SELECT COUNT(*) FROM game_lines 
+                WHERE timestamp >= ? AND timestamp <= ?
+            """, (start_timestamp, end_timestamp))
+            stats['lines_mined'] = cursor.fetchone()[0]
+            
+            # 本日Ankiカードに追加された文章数
+            cursor.execute("""
+                SELECT COUNT(*) FROM game_lines 
+                WHERE timestamp >= ? AND timestamp <= ?
+                AND (screenshot_in_anki != '' OR audio_in_anki != '')
+            """, (start_timestamp, end_timestamp))
+            stats['anki_cards_created'] = cursor.fetchone()[0]
+            
+            # 本日プレイしたゲーム数（ユニークなgame_name）
+            cursor.execute("""
+                SELECT COUNT(DISTINCT game_name) FROM game_lines 
+                WHERE timestamp >= ? AND timestamp <= ?
+            """, (start_timestamp, end_timestamp))
+            stats['games_played'] = cursor.fetchone()[0]
+            
+            # 累計文章数
+            cursor.execute("SELECT COUNT(*) FROM game_lines")
+            stats['total_lines'] = cursor.fetchone()[0]
+            
+            # 本日プレイしたゲームのリストと文字数
+            cursor.execute("""
+                SELECT game_name, 
+                       SUM(LENGTH(line_text)) as total_chars,
+                       COUNT(*) as line_count
+                FROM game_lines 
+                WHERE timestamp >= ? AND timestamp <= ?
+                AND game_name IS NOT NULL AND game_name != ''
+                GROUP BY game_name
+                ORDER BY total_chars DESC
+            """, (start_timestamp, end_timestamp))
+            
+            games_data = []
+            total_chars = 0
+            for row in cursor.fetchall():
+                game_name, chars, lines = row
+                games_data.append({
+                    'name': game_name,
+                    'chars': chars,
+                    'lines': lines
+                })
+                total_chars += chars
+            
+            stats['games_list'] = games_data
+            stats['total_chars'] = total_chars
+            
+            # 本日のプレイ時間を計算（最初と最後のタイムスタンプから）
+            cursor.execute("""
+                SELECT MIN(timestamp), MAX(timestamp) 
+                FROM game_lines 
+                WHERE timestamp >= ? AND timestamp <= ?
+            """, (start_timestamp, end_timestamp))
+            
+            result = cursor.fetchone()
+            if result[0] and result[1]:
+                time_diff = result[1] - result[0]
+                stats['play_time_hours'] = time_diff / 3600  # 秒を時間に変換
+            else:
+                stats['play_time_hours'] = 0
+            
+        except sqlite3.OperationalError as e:
+            print(f"データベースクエリエラー: {e}")
+            stats = {
+                'lines_mined': 0,
+                'anki_cards_created': 0,
+                'games_played': 0,
+                'total_lines': 0,
+                'games_list': [],
+                'total_chars': 0,
+                'play_time_hours': 0
+            }
         
-        games_data = []
-        total_chars = 0
-        for row in cursor.fetchall():
-            game_name, chars, lines = row
-            games_data.append({
-                'name': game_name,
-                'chars': chars,
-                'lines': lines
-            })
-            total_chars += chars
-        
-        stats['games_list'] = games_data
-        stats['total_chars'] = total_chars
-        
-        # 本日のプレイ時間を計算（最初と最後のタイムスタンプから）
-        cursor.execute("""
-            SELECT MIN(timestamp), MAX(timestamp) 
-            FROM game_lines 
-            WHERE timestamp >= ? AND timestamp <= ?
-        """, (start_timestamp, end_timestamp))
-        
-        result = cursor.fetchone()
-        if result[0] and result[1]:
-            time_diff = result[1] - result[0]
-            stats['play_time_hours'] = time_diff / 3600  # 秒を時間に変換
-        else:
-            stats['play_time_hours'] = 0
-        
-    except sqlite3.OperationalError as e:
-        print(f"データベースクエリエラー: {e}")
-        stats = {
-            'lines_mined': 0,
-            'anki_cards_created': 0,
-            'games_played': 0,
-            'total_lines': 0,
-            'games_list': [],
-            'total_chars': 0,
-            'play_time_hours': 0
-        }
-    
-    conn.close()
-    return stats
+        conn.close()
+        return stats
     
     def get_weekly_trend(self):
         """過去7日間のトレンドを取得"""
@@ -336,75 +335,67 @@ def get_today_stats(self, days_ago=0):
         chart += "```"
         return chart
     
-def format_report(self, stats, streak, days_ago=0):
-    """レポートをフォーマット"""
-    target_date = datetime.now() - timedelta(days=days_ago)
-    date_str = target_date.strftime('%B %d, %Y')
-    weekday = target_date.strftime('%A')
-    
-    # 前日のレポートなら表記を変更
-    title = "🎮 GSM Daily Report"
-    if days_ago == 1:
-        title = "🎮 GSM Daily Report (Yesterday)"
-    elif days_ago > 1:
-        title = f"🎮 GSM Daily Report ({days_ago} days ago)"
-    
-    # 基本統計のEmbed
-    embed = {
-        "title": title,
-        "description": f"**{date_str} ({weekday})**",
-        "color": 5814783,
-        "fields": [
-            {
-                "name": "⏱️ Play Time",
-                "value": f"**{stats['play_time_hours']:.1f}** hours",
-                "inline": True
-            },
-            {
-                "name": "📊 Characters",
-                "value": f"**{stats['total_chars']:,}** chars",
-                "inline": True
-            },
-            {
-                "name": "🔥 Streak",
-                "value": f"**{streak}** days",
-                "inline": True
-            },
-            {
-                "name": "✨ Anki Cards",
-                "value": f"**{stats['anki_cards_created']}** cards",
-                "inline": True
-            },
-            {
-                "name": "🎯 Games Played",
-                "value": f"**{stats['games_played']}** games",
-                "inline": True
-            }
-        ],
-        "footer": {
-            "text": "GameSentenceMiner Auto Report"
-        },
-        "timestamp": datetime.now().isoformat()
-    }
-    
-    # 今日プレイしたゲームの詳細を追加
-    if stats['games_list']:
-        games_text = ""
-        for i, game in enumerate(stats['games_list'][:5], 1):
-            games_text += f"{i}. **{game['name']}**\n"
-            games_text += f"   └ {game['lines']} lines / {game['chars']:,} chars\n"
+    def format_report(self, stats, streak):
+        """レポートをフォーマット"""
+        today = datetime.now().strftime('%B %d, %Y')
+        weekday = datetime.now().strftime('%A')
         
-        if len(stats['games_list']) > 5:
-            remaining = len(stats['games_list']) - 5
-            games_text += f"\n...and {remaining} more"
+        # 基本統計のEmbed
+        embed = {
+            "title": f"🎮 GSM Daily Report",
+            "description": f"**{today} ({weekday})**",
+            "color": 5814783,  # 青色
+            "fields": [
+                {
+                    "name": "⏱️ Play Time",
+                    "value": f"**{stats['play_time_hours']:.1f}** hours",
+                    "inline": True
+                },
+                {
+                    "name": "📊 Characters",
+                    "value": f"**{stats['total_chars']:,}** chars",
+                    "inline": True
+                },
+                {
+                    "name": "🔥 Streak",
+                    "value": f"**{streak}** days",
+                    "inline": True
+                },
+                {
+                    "name": "✨ Anki Cards",
+                    "value": f"**{stats['anki_cards_created']}** cards",
+                    "inline": True
+                },
+                {
+                    "name": "🎯 Games Played",
+                    "value": f"**{stats['games_played']}** games",
+                    "inline": True
+                }
+            ],
+            "footer": {
+                "text": "GameSentenceMiner Auto Report"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
         
-        embed["fields"].append({
-            "name": "🎮 Today's Games",
-            "value": games_text,
-            "inline": False
-        })
-    
-    return embed
+        # 今日プレイしたゲームの詳細を追加
+        if stats['games_list']:
+            games_text = ""
+            for i, game in enumerate(stats['games_list'][:5], 1):
+                games_text += f"{i}. **{game['name']}**\n"
+                games_text += f"   └ {game['lines']} lines / {game['chars']:,} chars\n"
+            
+            if len(stats['games_list']) > 5:
+                remaining = len(stats['games_list']) - 5
+                games_text += f"\n...and {remaining} more"
+            
+            embed["fields"].append({
+                "name": "🎮 Today's Games",
+                "value": games_text,
+                "inline": False
+            })
+        
+        return embed
     
     def send_to_discord(self, embed, heatmap_image):
         """Discordに送信"""
@@ -445,51 +436,31 @@ def format_report(self, stats, streak, days_ago=0):
             print(f"❌ 送信エラー: {e}")
             return False
     
-def generate_and_send_report(self, force=False, days_ago=0, check_missing=False):
-    """レポートを生成して送信
-    
-    Args:
-        force: 強制実行
-        days_ago: 何日前のデータか（0=今日、1=昨日）
-        check_missing: 過去の未送信レポートもチェックするか
-    """
-    # 未送信レポートのチェックモード
-    if check_missing:
-        self.check_and_send_missing_reports(max_days_back=7)
-        return
-    
-    target_date = datetime.now() - timedelta(days=days_ago)
-    date_str = target_date.strftime('%Y-%m-%d')
-    report_file = f"last_report_{date_str}.txt"
-    
-    # その日のレポートが送信済みかチェック
-    if not force and os.path.exists(report_file):
-        print(f"ℹ️  Report for {date_str} already sent")
-        return
-    
-    print(f"📊 Generating report for {date_str}...")
-    stats = self.get_today_stats(days_ago=days_ago)
-    
-    # データがない場合はスキップ
-    if stats['total_chars'] == 0:
-        print(f"ℹ️  No data for {date_str}, skipping...")
-        return
-    
-    streak = self.get_activity_streak()
-    
-    print("📈 Creating heatmap image...")
-    heatmap_image = self.create_activity_heatmap_image()
-    
-    embed = self.format_report(stats, streak, days_ago=days_ago)
-    
-    if self.send_to_discord(embed, heatmap_image):
-        with open(report_file, 'w') as f:
-            f.write(datetime.now().isoformat())
-        print("✅ Report sent successfully!")
-        print(f"   - Date: {date_str}")
-        print(f"   - Play time: {stats['play_time_hours']:.1f} hours")
-        print(f"   - Characters: {stats['total_chars']:,}")
-        print(f"   - Streak: {streak} days")
+    def generate_and_send_report(self, force=False):
+        """レポートを生成して送信"""
+        today = datetime.now().strftime('%Y-%m-%d')
+        last_report = self.get_last_report_date()
+        
+        # 同じ日に複数回実行されないようにチェック（forceオプションで上書き可能）
+        if not force and last_report == today:
+            print("ℹ️  本日は既に報告済みです（--force で強制実行可能）")
+            return
+        
+        print("📊 レポートを生成中...")
+        stats = self.get_today_stats()
+        streak = self.get_activity_streak()
+        
+        print("📈 ヒートマップ画像を生成中...")
+        heatmap_image = self.create_activity_heatmap_image()
+        
+        embed = self.format_report(stats, streak)
+        
+        if self.send_to_discord(embed, heatmap_image):
+            self.save_report_date(today)
+            print("✅ 報告完了！")
+            print(f"   - プレイ時間: {stats['play_time_hours']:.1f}時間")
+            print(f"   - 文字数: {stats['total_chars']:,}字")
+            print(f"   - 継続日数: {streak}日")
     
     def list_tables(self):
         """データベース内のテーブル一覧を表示（デバッグ用）"""
@@ -649,7 +620,6 @@ if __name__ == "__main__":
         # 通常実行（今日のレポート）
         else:
             reporter.generate_and_send_report(force=force)
-
 
 def check_and_send_missing_reports(self, max_days_back=7):
     """
